@@ -1,0 +1,3 @@
+This file has a completely different name and purpose.
+It should not be grouped with any other files.
+Used to test that unrelated files are not matched.

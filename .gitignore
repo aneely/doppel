@@ -1,0 +1,23 @@
+# Binaries
+doppel
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Local module cache (when using GOMODCACHE=.gomodcache)
+.gomodcache
+
+# Local build cache (e.g. GOCACHE=.gocache or GOCACHE=.go-build-cache)
+.gocache
+.go-build-cache
