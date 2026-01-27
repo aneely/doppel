@@ -151,6 +151,7 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		if len(m.groups) == 0 {
 			return m, tea.Quit
 		}
+		m.currentGroup = m.cursor
 		m.state = stateSelectFirstFile
 		m.cursor = 0
 		return m, nil
@@ -207,9 +208,9 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 func (m model) handleEscape() (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateSelectFirstFile:
-		// Go back to group selection
+		// Go back to group selection, restoring cursor to previously selected group
 		m.state = stateSelectGroup
-		m.cursor = 0
+		m.cursor = m.currentGroup
 		return m, nil
 
 	case stateSelectSecondFile:
