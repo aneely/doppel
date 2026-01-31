@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -214,5 +215,257 @@ func TestIntegration_MinPrefixLength(t *testing.T) {
 
 	if len(groups2) != 1 {
 		t.Errorf("Group() with min prefix 2 returned %d groups, expected 1", len(groups2))
+	}
+}
+
+// TestIntegration_SuffixFilter_BaseFileInclusion tests that base files are included with versioned files.
+func TestIntegration_SuffixFilter_BaseFileInclusion(t *testing.T) {
+	tmpDir := createTempDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Create test files: base file, versioned files, and date file
+	filesToCreate := []string{
+		"document.txt",
+		"document-1.txt",
+		"document-2.txt",
+		"document-2026-01-30.txt", // Date file - should be excluded
+		"report-2024.txt",           // Different prefix, date - should be excluded
+	}
+
+	for _, fileName := range filesToCreate {
+		createFile(t, tmpDir, fileName)
+	}
+
+	// Step 1: Scan
+	scanner := NewScanner(tmpDir)
+	files, err := scanner.Scan()
+	if err != nil {
+		t.Fatalf("Scan() failed: %v", err)
+	}
+
+	// Step 2: Filter by suffix pattern (hyphen + 1-2 digits)
+	pattern := regexp.MustCompile("-\\d{1,2}$")
+	filteredFiles := filterFilesBySuffix(files, pattern)
+
+	// Should include: document.txt, document-1.txt, document-2.txt
+	expectedFiles := map[string]bool{
+		"document.txt":     true,
+		"document-1.txt":   true,
+		"document-2.txt":  true,
+	}
+
+	if len(filteredFiles) != len(expectedFiles) {
+		t.Fatalf("filterFilesBySuffix() returned %d files, expected %d", len(filteredFiles), len(expectedFiles))
+	}
+
+	filteredFilenames := make(map[string]bool)
+	for _, file := range filteredFiles {
+		filteredFilenames[filepath.Base(file)] = true
+	}
+
+	for expected := range expectedFiles {
+		if !filteredFilenames[expected] {
+			t.Errorf("filterFilesBySuffix() missing expected file: %s", expected)
+		}
+	}
+
+	// Verify excluded files
+	excludedFiles := []string{"document-2026-01-30.txt", "report-2024.txt"}
+	for _, excluded := range excludedFiles {
+		if filteredFilenames[excluded] {
+			t.Errorf("filterFilesBySuffix() incorrectly included: %s", excluded)
+		}
+	}
+
+	// Step 3: Group filtered files
+	matcher := NewMatcher(3)
+	groups := matcher.Group(filteredFiles)
+
+	// Should find 1 group with document.txt, document-1.txt, document-2.txt
+	if len(groups) != 1 {
+		t.Fatalf("Group() returned %d groups, expected 1", len(groups))
+	}
+
+	if len(groups[0]) != 3 {
+		t.Fatalf("Group()[0] has %d files, expected 3", len(groups[0]))
+	}
+
+	groupFilenames := make(map[string]bool)
+	for _, file := range groups[0] {
+		groupFilenames[filepath.Base(file)] = true
+	}
+
+	for expected := range expectedFiles {
+		if !groupFilenames[expected] {
+			t.Errorf("Group missing file: %s", expected)
+		}
+	}
+}
+
+// TestIntegration_SuffixFilter_DateExclusion tests that date files are excluded.
+func TestIntegration_SuffixFilter_DateExclusion(t *testing.T) {
+	tmpDir := createTempDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Create files with dates
+	filesToCreate := []string{
+		"report.txt",
+		"report-1.txt",
+		"report-2024.txt", // 4 digits - should be excluded
+	}
+
+	for _, fileName := range filesToCreate {
+		createFile(t, tmpDir, fileName)
+	}
+
+	scanner := NewScanner(tmpDir)
+	files, err := scanner.Scan()
+	if err != nil {
+		t.Fatalf("Scan() failed: %v", err)
+	}
+
+	// Filter with restrictive pattern (1-2 digits only)
+	pattern := regexp.MustCompile("-\\d{1,2}$")
+	filteredFiles := filterFilesBySuffix(files, pattern)
+
+	// Should include: report.txt, report-1.txt
+	// Should exclude: report-2024.txt
+	expectedFiles := map[string]bool{
+		"report.txt":   true,
+		"report-1.txt": true,
+	}
+
+	if len(filteredFiles) != len(expectedFiles) {
+		t.Fatalf("filterFilesBySuffix() returned %d files, expected %d", len(filteredFiles), len(expectedFiles))
+	}
+
+	filteredFilenames := make(map[string]bool)
+	for _, file := range filteredFiles {
+		filteredFilenames[filepath.Base(file)] = true
+	}
+
+	for expected := range expectedFiles {
+		if !filteredFilenames[expected] {
+			t.Errorf("filterFilesBySuffix() missing expected file: %s", expected)
+		}
+	}
+
+	if filteredFilenames["report-2024.txt"] {
+		t.Error("filterFilesBySuffix() incorrectly included report-2024.txt")
+	}
+
+	// Group should contain report.txt and report-1.txt
+	matcher := NewMatcher(3)
+	groups := matcher.Group(filteredFiles)
+
+	if len(groups) != 1 {
+		t.Fatalf("Group() returned %d groups, expected 1", len(groups))
+	}
+
+	if len(groups[0]) != 2 {
+		t.Fatalf("Group()[0] has %d files, expected 2", len(groups[0]))
+	}
+}
+
+// TestIntegration_SuffixFilter_SpacePattern tests filtering with space + digits pattern.
+func TestIntegration_SuffixFilter_SpacePattern(t *testing.T) {
+	tmpDir := createTempDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	filesToCreate := []string{
+		"file.txt",
+		"file 1.txt",
+		"file 2.txt",
+		"file-backup.txt",
+	}
+
+	for _, fileName := range filesToCreate {
+		createFile(t, tmpDir, fileName)
+	}
+
+	scanner := NewScanner(tmpDir)
+	files, err := scanner.Scan()
+	if err != nil {
+		t.Fatalf("Scan() failed: %v", err)
+	}
+
+	// Filter with space + digits pattern
+	pattern := regexp.MustCompile(" \\d+$")
+	filteredFiles := filterFilesBySuffix(files, pattern)
+
+	// Should include: file.txt, file 1.txt, file 2.txt
+	expectedFiles := map[string]bool{
+		"file.txt":  true,
+		"file 1.txt": true,
+		"file 2.txt": true,
+	}
+
+	if len(filteredFiles) != len(expectedFiles) {
+		t.Fatalf("filterFilesBySuffix() returned %d files, expected %d", len(filteredFiles), len(expectedFiles))
+	}
+
+	filteredFilenames := make(map[string]bool)
+	for _, file := range filteredFiles {
+		filteredFilenames[filepath.Base(file)] = true
+	}
+
+	for expected := range expectedFiles {
+		if !filteredFilenames[expected] {
+			t.Errorf("filterFilesBySuffix() missing expected file: %s", expected)
+		}
+	}
+
+	if filteredFilenames["file-backup.txt"] {
+		t.Error("filterFilesBySuffix() incorrectly included file-backup.txt")
+	}
+
+	// Group should contain all three files
+	matcher := NewMatcher(3)
+	groups := matcher.Group(filteredFiles)
+
+	if len(groups) != 1 {
+		t.Fatalf("Group() returned %d groups, expected 1", len(groups))
+	}
+
+	if len(groups[0]) != 3 {
+		t.Fatalf("Group()[0] has %d files, expected 3", len(groups[0]))
+	}
+}
+
+// TestIntegration_SuffixFilter_NoMatches tests behavior when filter results in no matches.
+func TestIntegration_SuffixFilter_NoMatches(t *testing.T) {
+	tmpDir := createTempDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Create files that don't match the pattern
+	filesToCreate := []string{
+		"document.txt",
+		"report.txt",
+	}
+
+	for _, fileName := range filesToCreate {
+		createFile(t, tmpDir, fileName)
+	}
+
+	scanner := NewScanner(tmpDir)
+	files, err := scanner.Scan()
+	if err != nil {
+		t.Fatalf("Scan() failed: %v", err)
+	}
+
+	// Filter with pattern that matches nothing
+	pattern := regexp.MustCompile("-\\d+$")
+	filteredFiles := filterFilesBySuffix(files, pattern)
+
+	if len(filteredFiles) != 0 {
+		t.Fatalf("filterFilesBySuffix() returned %d files, expected 0", len(filteredFiles))
+	}
+
+	// Grouping should result in no groups
+	matcher := NewMatcher(3)
+	groups := matcher.Group(filteredFiles)
+
+	if groups != nil {
+		t.Errorf("Group() returned groups for empty filtered list, expected nil")
 	}
 }

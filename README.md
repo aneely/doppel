@@ -11,10 +11,11 @@ Doppel scans a directory for files that share common filename prefixes (e.g., `d
 ## Features
 
 - **Prefix-based matching**: Groups files that share a common filename prefix
+- **Suffix filtering**: Filter files by suffix pattern to focus on versioned files while excluding dates
 - **Interactive TUI**: Navigate through groups and select files using a modern terminal UI (bubbletea)
 - **Two-step file selection**: Pick two files one at a time for comparison
 - **Side-by-side diffs**: Compare files using the system `diff` command
-- **Configurable**: Adjust minimum prefix length and diff tool
+- **Configurable**: Adjust minimum prefix length, suffix pattern, and diff tool
 
 ## Installation
 
@@ -44,6 +45,7 @@ Scan a specific directory:
 
 - `--diff-tool <command>`: Override the default diff command (default: `diff`)
 - `--min-prefix <length>`: Minimum prefix length for grouping files (default: 3)
+- `--suffix <pattern>`: Only consider files whose names match the indicated suffix pattern (regex). Files matching the pattern and their corresponding base files (without the suffix) are included. Useful for focusing on versioned files while excluding date suffixes.
 - `--help`: Show usage information
 - `--version`: Show version information
 
@@ -61,11 +63,39 @@ Use a custom diff tool:
 ./doppel --diff-tool "git diff" /path/to/directory
 ```
 
+Filter files by suffix pattern to focus on versioned files:
+
+```bash
+# Filter to files ending with hyphen + 1-2 digits (versions, not dates)
+./doppel --suffix '-\d{1,2}' /path/to/directory
+
+# Filter to files ending with space + digits
+./doppel --suffix ' \d+' /path/to/directory
+```
+
+### Suffix Filtering
+
+The `--suffix` flag allows you to focus on files with specific suffix patterns (like version numbers) while excluding files with date suffixes. The filter includes:
+
+1. **Files matching the pattern**: Files whose filename ends with a match to the given regex pattern (e.g., `document-1.txt`, `document-2.txt`)
+2. **Base files**: Files without the suffix pattern that correspond to matching files (e.g., `document.txt` is included when `document-1.txt` matches)
+
+**Example**: With files `document.txt`, `document-1.txt`, `document-2.txt`, and `document-2026-01-30.txt`:
+
+- Using `--suffix '-\d{1,2}'` will include `document.txt`, `document-1.txt`, and `document-2.txt` (grouped together)
+- The date file `document-2026-01-30.txt` is excluded because it doesn't match the 1-2 digit pattern
+
+**Common patterns**:
+- `'-\d{1,2}'` - Hyphen + 1-2 digits (versions like `-1`, `-2`, excludes years like `-2024`)
+- `' \d+'` - Space + one or more digits (versions like ` 1`, ` 2`)
+- `'-\d+'` - Hyphen + one or more digits (includes dates, use with caution)
+
 ## How It Works
 
 1. **Scan**: The tool scans the specified directory (non-recursive) for all files
-2. **Match**: Files are grouped by common filename prefixes
-3. **Compare**: You can interactively select file pairs to compare using side-by-side diffs
+2. **Filter** (optional): If `--suffix` is provided, files are filtered to include only those matching the suffix pattern and their corresponding base files
+3. **Match**: Files are grouped by common filename prefixes
+4. **Compare**: You can interactively select file pairs to compare using side-by-side diffs
 
 ### Interactive TUI
 
@@ -159,6 +189,7 @@ doppel/
 ├── interactive.go       # Legacy interactive CLI interface (deprecated)
 ├── interactive_test.go  # Unit tests for interactive CLI
 ├── integration_test.go  # Integration tests for common code paths
+├── filter_test.go       # Unit tests for suffix filtering
 ├── assets/              # Project assets (e.g. hero image)
 ├── go.mod               # Go module definition
 ├── go.sum               # Go module checksums

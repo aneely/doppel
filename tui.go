@@ -151,6 +151,8 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		if len(m.groups) == 0 {
 			return m, tea.Quit
 		}
+		// Update currentGroup to match the selected group (cursor position)
+		m.currentGroup = m.cursor
 		m.state = stateSelectFirstFile
 		m.cursor = 0
 		return m, nil
@@ -302,12 +304,47 @@ func (m model) renderGroupSelection() string {
 		for _, file := range group {
 			filenames = append(filenames, filepath.Base(file))
 		}
-		fileList := strings.Join(filenames, ", ")
 		// Use consistent indentation for file list (4 spaces to align with group text)
 		indent := "    "
-		s.WriteString(indent)
-		s.WriteString(helpStyle.Render(fileList))
-		s.WriteString("\n\n")
+		// Calculate available width (account for indent and some margin)
+		availableWidth := m.width - len(indent) - 2
+		if availableWidth < 20 {
+			availableWidth = 20 // Minimum width
+		}
+		
+		// Build wrapped file list
+		currentLine := ""
+		for i, filename := range filenames {
+			// Add comma and space if not first item
+			item := filename
+			if i > 0 {
+				item = ", " + filename
+			}
+			
+			// Check if adding this item would exceed the width
+			if len(currentLine)+len(item) > availableWidth && currentLine != "" {
+				// Write current line and start new line
+				s.WriteString(indent)
+				s.WriteString(helpStyle.Render(currentLine))
+				s.WriteString("\n")
+				currentLine = filename
+			} else {
+				// Append to current line
+				if currentLine == "" {
+					currentLine = filename
+				} else {
+					currentLine += ", " + filename
+				}
+			}
+		}
+		
+		// Write the last line if there's content
+		if currentLine != "" {
+			s.WriteString(indent)
+			s.WriteString(helpStyle.Render(currentLine))
+			s.WriteString("\n")
+		}
+		s.WriteString("\n")
 	}
 
 	return s.String()
