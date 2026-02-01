@@ -135,6 +135,11 @@ func filterFilesBySuffix(files []string, pattern *regexp.Regexp) []string {
 		return files
 	}
 
+	// Compile regexes for checking date patterns (used to detect date patterns)
+	// These are compiled once outside the loop for efficiency
+	trailingHyphenDigits := regexp.MustCompile(`-\d+$`)
+	hyphenDigitPattern := regexp.MustCompile(`-\d+`)
+
 	// Step 1: Find files matching the suffix pattern and extract base names
 	type fileMatch struct {
 		file     string
@@ -153,6 +158,39 @@ func filterFilesBySuffix(files []string, pattern *regexp.Regexp) []string {
 			// Extract base name by removing the matched suffix
 			// Use ReplaceAllString to remove the matched portion
 			baseName := pattern.ReplaceAllString(baseFilename, "")
+			
+			// Additional check: if the base name ends with a hyphen followed by digits,
+			// this suggests the match was part of a date pattern (e.g., "2026-01-30" where "-30" matched)
+			// and we should exclude it. We want to match simple version patterns like "file-1" but
+			// not date patterns like "file-2026-01-30".
+			// Also check if the original filename has multiple hyphen+digit sequences, which indicates a date pattern
+			if trailingHyphenDigits.MatchString(baseName) {
+				// This is likely a date pattern - exclude it
+				continue
+			}
+			
+			// Additional check: if the original filename has 3+ hyphen+digit sequences, it's likely a date
+			// Count hyphen+digit patterns in the original filename
+			matches := hyphenDigitPattern.FindAllString(baseFilename, -1)
+			if len(matches) >= 3 {
+				// Multiple hyphen+digit sequences suggest a date pattern (e.g., "2026-01-30")
+				continue
+			}
+			
+			// Additional check: if any hyphen+digit sequence has 4+ digits, it's likely a year (e.g., "-2024")
+			hasLongSequence := false
+			for _, match := range matches {
+				// match is like "-2024", check if it has 4+ digits (excluding the hyphen)
+				if len(match) >= 5 { // "-" + 4+ digits
+					hasLongSequence = true
+					break
+				}
+			}
+			if hasLongSequence {
+				// Contains a 4+ digit sequence (likely a year) - exclude it
+				continue
+			}
+			
 			matchingFiles = append(matchingFiles, fileMatch{
 				file:     file,
 				baseName: baseName,
