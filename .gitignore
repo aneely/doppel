@@ -21,3 +21,4 @@ go.work
 # Local build cache (e.g. GOCACHE=.gocache or GOCACHE=.go-build-cache)
 .gocache
 .go-build-cache
+.DS_Store
