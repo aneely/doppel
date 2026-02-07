@@ -263,3 +263,198 @@ This approach is simpler than normalization and gives users direct control over 
 3. **Separate date detection**: Automatically detect dates. Less flexible, harder to maintain.
 
 **Chosen approach** (pre-filtering) is simpler, more flexible, and matches issue #7 exactly.
+
+---
+
+# Corrective Plan: Regex Anchoring and Date Exclusion Issues
+
+## Issues Identified
+
+### High Severity: Regex Anchoring Problem
+
+**Location**: `main.go:73-74, 157`
+
+**Problem**: 
+
+- Line 73 adds `$` anchor: `patternStr := *suffixPattern + "$"`
+- Line 157 uses `MatchString()` which doesn't require end anchoring
+- If user provides `-\d{1,2}$`, we get `-\d{1,2}$$` (double anchor)
+- Even with single `$`, `MatchString()` can match anywhere (e.g., `file-1-backup` matches `-1`)
+
+**Root Cause**: `MatchString()` checks if pattern matches anywhere in the string, not requiring it to match at the end. The `$` anchor in the pattern helps, but:
+
+1. Users might already include `$` in their pattern
+2. We need to verify the match position is actually at the end
+
+### Medium Severity: Fragile Date Exclusion Heuristics
+
+**Location**: `main.go:153-181`
+
+**Problem**:
+
+- Complex, undocumented heuristics for detecting date patterns
+- Multiple checks: trailing hyphens, sequence counting, length checking
+- Hard to understand and maintain
+- No clear documentation of what constitutes a "date pattern"
+
+## Proposed Solutions
+
+### Fix 1: Correct Regex Anchoring (High Priority)
+
+**Approach**: Use `FindStringIndex()` or `FindStringSubmatchIndex()` to verify the match is at the end of the string, rather than relying solely on `MatchString()`.
+
+**Implementation**:
+
+1. **Normalize pattern input** (`main.go:71-79`):
+  - Check if user-provided pattern already ends with `$`
+  - If not, append `$` anchor
+  - If yes, use pattern as-is (avoid double `$$`)
+2. **Fix matching logic** (`main.go:157`):
+  - Replace `pattern.MatchString(baseFilename)` 
+  - Use `pattern.FindStringIndex(baseFilename)` to get match position
+  - Verify match ends at `len(baseFilename)` (end of string)
+  - Only proceed if match is anchored at end
+
+**Code Changes**:
+
+```go
+// In main.go:71-79 - Normalize pattern
+if *suffixPattern != "" {
+    patternStr := *suffixPattern
+    // Only add $ if pattern doesn't already end with it
+    if !strings.HasSuffix(patternStr, "$") {
+        patternStr = patternStr + "$"
+    }
+    pattern, err := regexp.Compile(patternStr)
+    // ... rest of compilation
+}
+
+// In main.go:157 - Fix matching
+// Replace: if pattern.MatchString(baseFilename)
+// With:
+match := pattern.FindStringIndex(baseFilename)
+if match != nil && match[1] == len(baseFilename) {
+    // Match is anchored at end - proceed
+}
+```
+
+**Testing**:
+
+- Test with pattern `-\d{1,2}` (should add `$`)
+- Test with pattern `-\d{1,2}$` (should not double `$`)
+- Test `file-1-backup` with pattern `-\d{1,2}` (should NOT match)
+- Test `file-1` with pattern `-\d{1,2}` (should match)
+- Verify existing tests still pass
+
+### Fix 2: Document and Refactor Date Exclusion (Medium Priority)
+
+**Approach**: Document the heuristics clearly and consider simplifying or extracting to a helper function.
+
+**Options**:
+
+**Option A: Document and Extract** (Recommended)
+
+- Extract date detection logic to a helper function `isLikelyDatePattern(baseFilename string) bool`
+- Add comprehensive documentation explaining the heuristics
+- Keep current logic but make it more maintainable
+
+**Option B: Simplify Heuristics**
+
+- Remove complex checks, rely on pattern restrictiveness (e.g., `-\d{1,2}` naturally excludes `-2024`)
+- Only keep essential checks if pattern is too permissive
+
+**Recommendation**: Option A - document and extract, as the heuristics handle edge cases that pattern restrictiveness alone might miss.
+
+**Implementation**:
+
+1. Create helper function `isLikelyDatePattern()` in `main.go`
+2. Document each heuristic with examples
+3. Replace inline logic with function call
+4. Add unit tests for date detection edge cases
+
+**Code Structure**:
+
+```go
+// isLikelyDatePattern checks if a filename base (without extension) 
+// appears to be a date pattern rather than a version pattern.
+// 
+// Heuristics used:
+// 1. If removing the matched suffix leaves trailing hyphen+digits, 
+//    it's likely part of a date (e.g., "2026-01-30" where "-30" matched)
+// 2. If filename has 3+ hyphen+digit sequences, it's likely a date
+// 3. If any hyphen+digit sequence has 4+ digits, it's likely a year
+//
+// Examples:
+//   - "file-2026-01-30" -> true (multiple sequences)
+//   - "file-2024" -> true (4+ digit sequence)
+//   - "file-1" -> false (single sequence, short)
+func isLikelyDatePattern(baseFilename string) bool {
+    // Extract current heuristics logic here
+}
+```
+
+**Testing**:
+
+- Test `file-2026-01-30` (should be detected as date)
+- Test `file-2024` (should be detected as date)
+- Test `file-1` (should NOT be detected as date)
+- Test `file-1-backup` (edge case - should NOT be date)
+
+## Files to Modify
+
+1. `**main.go**`:
+  - Fix pattern normalization (lines 71-79)
+  - Fix matching logic (line 157)
+  - Extract date detection to helper function (lines 153-181)
+  - Add documentation
+2. `**filter_test.go**`:
+  - Add tests for double `$` anchor case
+  - Add tests for `file-1-backup` not matching `-\d{1,2}`
+  - Add tests for date detection helper function
+
+## Implementation Order
+
+1. **Phase 1: Fix Regex Anchoring** (High Priority)
+  - Normalize pattern input (prevent double `$`)
+  - Fix matching to verify end position
+  - Add tests
+  - Verify existing tests pass
+2. **Phase 2: Document Date Exclusion** (Medium Priority)
+  - Extract to helper function
+  - Add comprehensive documentation
+  - Add tests for date detection
+  - Verify existing tests pass
+
+## Risk Assessment
+
+**Low Risk**: 
+
+- Changes are localized to `filterFilesBySuffix()` function
+- Existing tests provide good coverage
+- Can verify backward compatibility with test suite
+
+**Testing Strategy**:
+
+- Run full test suite: `go test ./...`
+- Add new tests for edge cases
+- Manual testing with `testdata/` directory
+- Verify CLI behavior with various patterns
+
+## Notes
+
+- The low severity issues (regex recompilation, filename ending in `.`) can be addressed in a follow-up if needed
+- Focus on high and medium severity items first
+- Ensure backward compatibility with existing `--suffix` usage patterns
+
+## Implementation Status
+
+**Completed**: All fixes have been implemented and tested:
+
+- ✅ Fixed pattern normalization to prevent double `$` anchor
+- ✅ Fixed matching logic to use `FindStringIndex()` and verify match is at end
+- ✅ Extracted date detection to `isLikelyDatePattern()` helper function
+- ✅ Added comprehensive documentation for date detection heuristics
+- ✅ Added tests for anchoring fixes (`TestFilterFilesBySuffix_PatternWithAnchor`, `TestFilterFilesBySuffix_AnchoredMatch`)
+- ✅ Added tests for date detection (`TestIsLikelyDatePattern` with 7 test cases)
+
+All tests pass successfully.
